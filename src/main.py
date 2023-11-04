@@ -13,15 +13,24 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.select import Select
 
 load_dotenv()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("logs.log"),
+        logging.StreamHandler()
+    ]
+)
 
 browser = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
-wait = WebDriverWait(browser, 3)
+wait = WebDriverWait(browser, 5)
 
 def acceptCookies():
     try: 
         wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(text(),"Accept all")]'))).click()
-    except: 
-        return
+        time.sleep(1)
+    except Exception: 
+        pass
 
 def userName():
     wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="popover-login" and .//*[contains(text(),"Log in")]]'))).click()
@@ -49,23 +58,32 @@ def password():
     elem.send_keys(os.getenv('DISNAT_PASSWORD'))
     elem.send_keys(Keys.RETURN)
 
-def trade():
+def trade(folioName, symbolCode, percentageOfTotalAccount):
+    # Does not work for some reason...
+    # wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="site-header" and .//a[@data-menu-item="orders"]]'))).click()
+    browser.get('https://tmw.secure.vmd.ca/s9web/secure/orders')
+    time.sleep(1)
+
     select = Select(wait.until(EC.element_to_be_clickable((By.ID, 'trade-account'))))
-    select.select_by_visible_text(os.getenv('DISNAT_FOLIO_NAME'))
+    select.select_by_visible_text(folioName)
 
     select = Select(wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'select[id^="trade-transaction"]'))))
     select.select_by_visible_text('Buy')
 
     elem = wait.until(EC.element_to_be_clickable((By.ID, 'trade-symbol')))
     elem.click()
-    elem.send_keys(os.getenv('DISNAT_SYMBOL_CODE'))
+    elem.send_keys(symbolCode)
     time.sleep(1)
     elem.send_keys(Keys.RETURN)
 
     available = wait.until(EC.presence_of_element_located((By.XPATH, '//*[starts-with(@data-test-field,"buy_power_")]'))).get_attribute("data-test-value")
     currentPrice = wait.until(EC.presence_of_element_located((By.XPATH, '//span[@domid="LastPrice"]'))).text
 
-    qty = math.floor(float(available) * float(os.getenv('AMOUNT_PERCENTAGE_TO_PLACE')) / float(currentPrice))
+    qty = math.floor(float(available) * float(percentageOfTotalAccount) / float(currentPrice))
+
+    if qty <= 0:
+        logging.info('Not enough funds')
+        return
 
     elem = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[id^="trade-quantity"]')))
     elem.click()
@@ -74,11 +92,20 @@ def trade():
     wait.until(EC.element_to_be_clickable((By.XPATH, '//label[contains(text(),"Market")]'))).click()
     wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(text(),"Verify")]'))).click()
     try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(),"Confirmation : ")]'))).click()
-    except:
-        logging.exception('No confirmation required')
-    wait.until(EC.element_to_be_clickable((By.XPATH, '//button[@data-test-button="submit"]]'))).click()
+        wait.until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(),"Confirmation")]'))).click()
+    except Exception:
+        pass
+
+    try:
+        wait.until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(),"Warning")]'))).click()
+    except Exception:
+        pass
+        
+    wait.until(EC.element_to_be_clickable((By.XPATH, '//button[@data-test-button="submit"]'))).click()
+    time.sleep(5)
+    wait.until(EC.presence_of_element_located((By.XPATH, '//*[contains(text(),"Your order is executed")]')))
     
+    logging.info('TRANSACTION: %s units (%s$/each) %s bought successfully from "%s" for the total price of %s$', qty, currentPrice, symbolCode, folioName, qty * float(currentPrice))
 
 try: 
     browser.get('https://www.disnat.com/en')
@@ -92,12 +119,15 @@ try:
     acceptCookies()
     password()
 
-    # Does not work for some reason...
-    # wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="site-header" and .//a[@data-menu-item="orders"]]'))).click()
-    browser.get('https://tmw.secure.vmd.ca/s9web/secure/orders')
-    time.sleep(1)
+    amoutPercent1 = float(os.getenv('AMOUNT_PERCENTAGE1')) if os.getenv('AMOUNT_PERCENTAGE1') else float(0)
+    amoutPercent2 = float(os.getenv('AMOUNT_PERCENTAGE2')) if os.getenv('AMOUNT_PERCENTAGE2') else float(0)
     
-    trade()
-    time.sleep(10)
+    if os.getenv('DISNAT_SYMBOL_CODE1') and amoutPercent1 > 0:
+        trade(os.getenv('DISNAT_FOLIO_NAME'), os.getenv('DISNAT_SYMBOL_CODE1'), amoutPercent1)
+    if os.getenv('DISNAT_SYMBOL_CODE2') and amoutPercent2 > 0:
+        trade(os.getenv('DISNAT_FOLIO_NAME'), os.getenv('DISNAT_SYMBOL_CODE2'), amoutPercent1 + amoutPercent2)
+except:
+    logging.exception('Exception occurred')
 finally:
+    time.sleep(10)
     browser.quit()
