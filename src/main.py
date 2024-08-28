@@ -22,7 +22,7 @@ logging.basicConfig(
     ]
 )
 
-browser = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
+browser = webdriver.Chrome()
 wait = WebDriverWait(browser, 5)
 
 def acceptCookies():
